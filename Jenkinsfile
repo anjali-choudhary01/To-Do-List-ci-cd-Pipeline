@@ -13,7 +13,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/akshitkumar74/To-Do-List.git'
+                git branch: 'main', url: 'https://github.com/anjali-choudhary01/To-Do-List-ci-cd-Pipeline.git'
             }
         }
 
