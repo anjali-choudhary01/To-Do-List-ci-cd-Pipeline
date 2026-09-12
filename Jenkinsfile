@@ -1,3 +1,137 @@
+// pipeline {
+//     agent any
+
+//     options {
+//         timestamps()
+//         buildDiscarder(logRotator(numToKeepStr: '20'))
+//     }
+
+//     tools {
+//         nodejs 'node'
+//     }
+
+//     stages {
+//         stage('Checkout') {
+//             steps {
+//                 git branch: 'main', url: 'https://github.com/anjali-choudhary01/To-Do-List-ci-cd-Pipeline.git'
+//             }
+//         }
+
+//         stage('Install') {
+//             steps {
+//                 bat 'npm install'
+//             }
+//         }
+
+//         stage('Lint') {
+//             steps {
+//                 bat 'npm run lint'
+//             }
+//         }
+
+//         stage('Test') {
+//     steps {
+//         bat 'npm test'
+//     }
+// }
+
+//         stage('Security Scan') {
+//             steps {
+//                 catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+//                     bat 'trivy fs --include-dev-deps --format json --output trivy-report.json .'
+//                     bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\push-trivy-metrics.ps1'
+//                     bat 'trivy fs --include-dev-deps --format template --template "@scripts/trivy-html.tpl" -o trivy-report.html .'
+//                 }
+//                 archiveArtifacts artifacts: 'trivy-report.html', allowEmptyArchive: true, fingerprint: true
+
+//                 bat 'trivy fs --include-dev-deps --exit-code 1 --severity HIGH,CRITICAL .'
+//             }
+//         }
+
+//         // stage('SonarCloud Analysis') {
+//         //     steps {
+//         //         withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
+//         //             bat 'npx --yes sonarqube-scanner -Dsonar.organization=akshitkumar74 -Dsonar.projectKey=akshitkumar74_To-Do-List -Dsonar.sources=. -Dsonar.host.url=https://sonarcloud.io -Dsonar.token=%SONAR_TOKEN%'
+//         //         }
+//         //     }
+//         // }
+//         stage('SonarCloud Analysis') {
+//             steps {
+//                 script {
+//                     def scannerHome = tool 'SonarScanner'
+
+//                     withSonarQubeEnv('SonarQube Cloud') {
+//                     bat "\"${scannerHome}\\bin\\sonar-scanner.bat\" -Dsonar.organization=anjali-choudhary01 -Dsonar.projectKey=anjali-choudhary01_To-Do-List-ci-cd-Pipeline -Dsonar.sources=."
+//             }
+//         }
+//     }
+// }
+
+//         stage('Docker Build') {
+//             steps {
+//                 bat 'docker build -t to-do-list-app:%BUILD_NUMBER% .'
+//             }
+//         }
+
+//         stage('Archive') {
+//             steps {
+//                 bat 'powershell -NoProfile -Command "Compress-Archive -Path index.html,todo.html,auth.js,auth.css,supabaseClient.js,script.js,style.css,images -DestinationPath to-do-list.zip -Force"'
+//                 archiveArtifacts artifacts: 'to-do-list.zip', fingerprint: true
+//             }
+//         }
+
+//         stage('Deploy') {
+//             steps {
+//                 withCredentials([string(credentialsId: 'vercel-token', variable: 'VERCEL_TOKEN')]) {
+//                     withEnv([
+//                         'VERCEL_ORG_ID=team_9sZCT5UF0EVbDMjUGLMKvz2Y',
+//                         'VERCEL_PROJECT_ID=prj_aXVzh8MAd9TiqfBy1DAdhACJqfkv'
+//                     ]) {
+//                         bat 'npx --yes vercel --prod --token=%VERCEL_TOKEN% --yes'
+//                     }
+//                 }
+//             }
+//         }
+
+//         stage('OWASP ZAP Scan') {
+//             steps {
+//                 script {
+//                     def zapExitCode = bat(
+//                         script: 'docker run -t -v "%WORKSPACE%:/zap/wrk/:rw" zaproxy/zap-stable zap-baseline.py -t https://to-do-list-chi-eight-59.vercel.app -r zap-report.html -J zap-report.json',
+//                         returnStatus: true
+//                     )
+//                     if (zapExitCode != 0) {
+//                         echo "ZAP baseline scan exited with code ${zapExitCode} (non-zero usually just means it found warnings/alerts)"
+//                         unstable("ZAP baseline scan found issues (exit code ${zapExitCode})")
+//                     }
+
+//                     catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+//                         bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\push-zap-metrics.ps1'
+//                     }
+//                 }
+//                 archiveArtifacts artifacts: 'zap-report.html', allowEmptyArchive: true, fingerprint: true
+//             }
+//         }
+//     }
+
+//     post {
+//         always {
+//             cleanWs()
+//         }
+//         success {
+//             mail to: 'akshitchoudhary7409@gmail.com',
+//                  subject: "✅ Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+//                  body: "Build successful!\n\nCheck details: ${env.BUILD_URL}"
+//         }
+//         failure {
+//             mail to: 'akshitchoudhary7409@gmail.com',
+//                  subject: "❌ Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+//                  body: "Build failed!\n\nCheck details: ${env.BUILD_URL}"
+//         }
+//     }
+// }
+
+
 pipeline {
     agent any
 
@@ -11,9 +145,11 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/anjali-choudhary01/To-Do-List-ci-cd-Pipeline.git'
+                git branch: 'main',
+                    url: 'https://github.com/anjali-choudhary01/To-Do-List-ci-cd-Pipeline.git'
             }
         }
 
@@ -30,19 +166,26 @@ pipeline {
         }
 
         stage('Test') {
-    steps {
-        bat 'npm test'
-    }
-}
+            steps {
+                bat 'npm test'
+            }
+        }
 
         stage('Security Scan') {
             steps {
+
                 catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+
                     bat 'trivy fs --include-dev-deps --format json --output trivy-report.json .'
+
                     bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\push-trivy-metrics.ps1'
+
                     bat 'trivy fs --include-dev-deps --format template --template "@scripts/trivy-html.tpl" -o trivy-report.html .'
                 }
-                archiveArtifacts artifacts: 'trivy-report.html', allowEmptyArchive: true, fingerprint: true
+
+                archiveArtifacts artifacts: 'trivy-report.html',
+                    allowEmptyArchive: true,
+                    fingerprint: true
 
                 bat 'trivy fs --include-dev-deps --exit-code 1 --severity HIGH,CRITICAL .'
             }
@@ -50,8 +193,14 @@ pipeline {
 
         stage('SonarCloud Analysis') {
             steps {
-                withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
-                    bat 'npx --yes sonarqube-scanner -Dsonar.organization=akshitkumar74 -Dsonar.projectKey=akshitkumar74_To-Do-List -Dsonar.sources=. -Dsonar.host.url=https://sonarcloud.io -Dsonar.token=%SONAR_TOKEN%'
+                script {
+
+                    def scannerHome = tool 'SonarScanner'
+
+                    withSonarQubeEnv('SonarQube Cloud') {
+
+                        bat "\"${scannerHome}\\bin\\sonar-scanner.bat\" -Dsonar.organization=anjali-choudhary01 -Dsonar.projectKey=anjali-choudhary01_To-Do-List-ci-cd-Pipeline -Dsonar.sources=."
+                    }
                 }
             }
         }
@@ -64,18 +213,29 @@ pipeline {
 
         stage('Archive') {
             steps {
+
                 bat 'powershell -NoProfile -Command "Compress-Archive -Path index.html,todo.html,auth.js,auth.css,supabaseClient.js,script.js,style.css,images -DestinationPath to-do-list.zip -Force"'
-                archiveArtifacts artifacts: 'to-do-list.zip', fingerprint: true
+
+                archiveArtifacts artifacts: 'to-do-list.zip',
+                    fingerprint: true
             }
         }
 
         stage('Deploy') {
             steps {
-                withCredentials([string(credentialsId: 'vercel-token', variable: 'VERCEL_TOKEN')]) {
+
+                withCredentials([
+                    string(
+                        credentialsId: 'vercel-api-token',
+                        variable: 'VERCEL_TOKEN'
+                    )
+                ]) {
+
                     withEnv([
-                        'VERCEL_ORG_ID=team_9sZCT5UF0EVbDMjUGLMKvz2Y',
-                        'VERCEL_PROJECT_ID=prj_aXVzh8MAd9TiqfBy1DAdhACJqfkv'
+                        'VERCEL_ORG_ID=team_lIUUBohaz6LvLVQOhv3iZUs8',
+                        'VERCEL_PROJECT_ID=prj_5ERx4TQpdiFEeBBUjyfs30ul84eZ'
                     ]) {
+
                         bat 'npx --yes vercel --prod --token=%VERCEL_TOKEN% --yes'
                     }
                 }
@@ -85,35 +245,50 @@ pipeline {
         stage('OWASP ZAP Scan') {
             steps {
                 script {
+
                     def zapExitCode = bat(
-                        script: 'docker run -t -v "%WORKSPACE%:/zap/wrk/:rw" zaproxy/zap-stable zap-baseline.py -t https://to-do-list-chi-eight-59.vercel.app -r zap-report.html -J zap-report.json',
+                        script: 'docker run -t -v "%WORKSPACE%:/zap/wrk/:rw" zaproxy/zap-stable zap-baseline.py -t https://to-do-list-ci-cd-pipeline.vercel.app -r zap-report.html -J zap-report.json',
                         returnStatus: true
                     )
+
                     if (zapExitCode != 0) {
+
                         echo "ZAP baseline scan exited with code ${zapExitCode} (non-zero usually just means it found warnings/alerts)"
-                        unstable("ZAP baseline scan found issues (exit code ${zapExitCode})")
+
+                        unstable(
+                            "ZAP baseline scan found issues (exit code ${zapExitCode})"
+                        )
                     }
 
                     catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+
                         bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\push-zap-metrics.ps1'
                     }
                 }
-                archiveArtifacts artifacts: 'zap-report.html', allowEmptyArchive: true, fingerprint: true
+
+                archiveArtifacts artifacts: 'zap-report.html',
+                    allowEmptyArchive: true,
+                    fingerprint: true
             }
         }
     }
 
     post {
+
         always {
             cleanWs()
         }
+
         success {
-            mail to: 'akshitchoudhary7409@gmail.com',
+
+            mail to: 'anjalichoudhary8844@gmail.com',
                  subject: "✅ Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                  body: "Build successful!\n\nCheck details: ${env.BUILD_URL}"
         }
+
         failure {
-            mail to: 'akshitchoudhary7409@gmail.com',
+
+            mail to: 'anjalichoudhary8844@gmail.com',
                  subject: "❌ Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                  body: "Build failed!\n\nCheck details: ${env.BUILD_URL}"
         }
