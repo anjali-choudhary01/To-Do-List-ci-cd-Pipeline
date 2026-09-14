@@ -150,7 +150,7 @@ $payload = ($lines -join "`n") + "`n"
 [System.IO.File]::WriteAllText(
     $metricsFile,
     $payload,
-    [System.Text.Encoding]::UTF8
+    [System.Text.UTF8Encoding]::new($false)
 )
 
 Write-Host ""
@@ -169,7 +169,7 @@ $pushgatewayUrl =
 Write-Host "Pushing metrics to:"
 Write-Host $pushgatewayUrl
 
-curl.exe -sS `
+curl.exe -sS --fail-with-body `
     --data-binary "@$metricsFile" `
     "$pushgatewayUrl"
 
