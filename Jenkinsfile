@@ -1,3 +1,14 @@
+def pushStageMetric(String stageName, String status) {
+    catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+        bat """
+            powershell -NoProfile -ExecutionPolicy Bypass ^
+            -File scripts\\push-stage-metrics.ps1 ^
+            -Stage "${stageName}" ^
+            -Status "${status}"
+        """
+    }
+}
+
 pipeline {
     agent any
 
@@ -14,8 +25,25 @@ pipeline {
 
         stage('Checkout') {
             steps {
+                script {
+                    // Initialize all CI/CD stage metrics
+                    pushStageMetric('Pipeline', 'INIT')
+                }
+
                 git branch: 'main',
                     url: 'https://github.com/anjali-choudhary01/To-Do-List-ci-cd-Pipeline.git'
+            }
+
+            post {
+                success {
+                    pushStageMetric('Checkout', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('Checkout', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('Checkout', 'FAILURE')
+                }
             }
         }
 
@@ -23,17 +51,53 @@ pipeline {
             steps {
                 bat 'npm install'
             }
+
+            post {
+                success {
+                    pushStageMetric('Install', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('Install', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('Install', 'FAILURE')
+                }
+            }
         }
 
         stage('Lint') {
             steps {
                 bat 'npm run lint'
             }
+
+            post {
+                success {
+                    pushStageMetric('Lint', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('Lint', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('Lint', 'FAILURE')
+                }
+            }
         }
 
         stage('Test') {
             steps {
                 bat 'npm test'
+            }
+
+            post {
+                success {
+                    pushStageMetric('Test', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('Test', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('Test', 'FAILURE')
+                }
             }
         }
 
@@ -70,18 +134,40 @@ pipeline {
                       --severity HIGH,CRITICAL .
                 '''
             }
+
+            post {
+                success {
+                    pushStageMetric('Security Scan - Trivy', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('Security Scan - Trivy', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('Security Scan - Trivy', 'FAILURE')
+                }
+            }
         }
 
         stage('SonarCloud Analysis') {
             steps {
                 script {
-
                     def scannerHome = tool 'SonarScanner'
 
                     withSonarQubeEnv('SonarQube Cloud') {
-
                         bat "\"${scannerHome}\\bin\\sonar-scanner.bat\" -Dsonar.organization=anjali-choudhary01 -Dsonar.projectKey=anjali-choudhary01_To-Do-List-ci-cd-Pipeline -Dsonar.sources=. -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.test.js -Dsonar.tests=. -Dsonar.test.inclusions=**/*.test.js -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
                     }
+                }
+            }
+
+            post {
+                success {
+                    pushStageMetric('SonarCloud Analysis', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('SonarCloud Analysis', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('SonarCloud Analysis', 'FAILURE')
                 }
             }
         }
@@ -90,11 +176,22 @@ pipeline {
             steps {
                 bat 'docker build -t to-do-list-app:%BUILD_NUMBER% .'
             }
+
+            post {
+                success {
+                    pushStageMetric('Docker Build', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('Docker Build', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('Docker Build', 'FAILURE')
+                }
+            }
         }
 
         stage('Archive Application') {
             steps {
-
                 bat '''
                     powershell -NoProfile -Command ^
                     "Compress-Archive -Path index.html,todo.html,auth.js,auth.css,supabaseClient.js,script.js,style.css,images -DestinationPath to-do-list.zip -Force"
@@ -103,34 +200,53 @@ pipeline {
                 archiveArtifacts artifacts: 'to-do-list.zip',
                     fingerprint: true
             }
+
+            post {
+                success {
+                    pushStageMetric('Archive Application', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('Archive Application', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('Archive Application', 'FAILURE')
+                }
+            }
         }
 
         stage('Deploy to Vercel') {
             steps {
-
                 withCredentials([
                     string(
                         credentialsId: 'vercel-api-token',
                         variable: 'VERCEL_TOKEN'
                     )
                 ]) {
-
                     withEnv([
                         'VERCEL_ORG_ID=team_lIUUBohaz6LvLVQOhv3iZUs8',
                         'VERCEL_PROJECT_ID=prj_5ERx4TQpdiFEeBBUjyfs30ul84eZ'
                     ]) {
-
                         bat 'npx --yes vercel --prod --token=%VERCEL_TOKEN% --yes'
                     }
+                }
+            }
+
+            post {
+                success {
+                    pushStageMetric('Deploy to Vercel', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('Deploy to Vercel', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('Deploy to Vercel', 'FAILURE')
                 }
             }
         }
 
         stage('OWASP ZAP Scan') {
             steps {
-
                 script {
-
                     def zapExitCode = bat(
                         script: '''
                             docker run -t ^
@@ -152,7 +268,6 @@ pipeline {
                     }
 
                     catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
-
                         bat '''
                             powershell -NoProfile -ExecutionPolicy Bypass ^
                             -File scripts\\push-zap-metrics.ps1
@@ -164,20 +279,29 @@ pipeline {
                     allowEmptyArchive: true,
                     fingerprint: true
             }
+
+            post {
+                success {
+                    pushStageMetric('OWASP ZAP Scan', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('OWASP ZAP Scan', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('OWASP ZAP Scan', 'FAILURE')
+                }
+            }
         }
 
         stage('DefectDojo - Trivy') {
             steps {
-
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-
                     withCredentials([
                         string(
                             credentialsId: 'defectdojo-api-key',
                             variable: 'DEFECTDOJO_API_KEY'
                         )
                     ]) {
-
                         bat '''
                             echo.
                             echo ==========================================
@@ -211,20 +335,29 @@ pipeline {
                     }
                 }
             }
+
+            post {
+                success {
+                    pushStageMetric('DefectDojo - Trivy', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('DefectDojo - Trivy', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('DefectDojo - Trivy', 'FAILURE')
+                }
+            }
         }
 
         stage('DefectDojo - ZAP') {
             steps {
-
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-
                     withCredentials([
                         string(
                             credentialsId: 'defectdojo-api-key',
                             variable: 'DEFECTDOJO_API_KEY'
                         )
                     ]) {
-
                         bat '''
                             echo.
                             echo ==========================================
@@ -261,27 +394,34 @@ pipeline {
                     }
                 }
             }
+
+            post {
+                success {
+                    pushStageMetric('DefectDojo - ZAP', 'SUCCESS')
+                }
+                unstable {
+                    pushStageMetric('DefectDojo - ZAP', 'UNSTABLE')
+                }
+                failure {
+                    pushStageMetric('DefectDojo - ZAP', 'FAILURE')
+                }
+            }
         }
     }
 
     post {
-
         always {
-
             echo "Pipeline completed. Cleaning workspace."
-
             cleanWs()
         }
 
         success {
-
             mail to: 'anjalichoudhary8844@gmail.com',
                  subject: "✅ Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                  body: "Build successful!\n\nCheck details: ${env.BUILD_URL}"
         }
 
         failure {
-
             mail to: 'anjalichoudhary8844@gmail.com',
                  subject: "❌ Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                  body: "Build failed!\n\nCheck details: ${env.BUILD_URL}"
