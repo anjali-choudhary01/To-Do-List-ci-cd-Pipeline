@@ -12,6 +12,10 @@ pipeline {
 
     stages {
 
+        // ============================================================
+        // CHECKOUT
+        // ============================================================
+
         stage('Checkout') {
             steps {
                 git branch: 'main',
@@ -19,11 +23,21 @@ pipeline {
             }
         }
 
+
+        // ============================================================
+        // INSTALL
+        // ============================================================
+
         stage('Install') {
             steps {
                 bat 'npm install'
             }
         }
+
+
+        // ============================================================
+        // LINT
+        // ============================================================
 
         stage('Lint') {
             steps {
@@ -31,34 +45,58 @@ pipeline {
             }
         }
 
+
+        // ============================================================
+        // TEST
+        // ============================================================
+
         stage('Test') {
             steps {
                 bat 'npm test'
             }
         }
 
+
+        // ============================================================
+        // TRIVY SECURITY SCAN
+        // ============================================================
+
         stage('Security Scan') {
             steps {
 
-                catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+                catchError(
+                    buildResult: 'SUCCESS',
+                    stageResult: 'SUCCESS'
+                ) {
 
+                    // Generate Trivy JSON report
                     bat 'trivy fs --include-dev-deps --format json --output trivy-report.json .'
 
+                    // Push Trivy metrics to Prometheus Pushgateway
                     bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\push-trivy-metrics.ps1'
 
+                    // Generate HTML report
                     bat 'trivy fs --include-dev-deps --format template --template "@scripts/trivy-html.tpl" -o trivy-report.html .'
                 }
 
+                // Archive HTML report
                 archiveArtifacts artifacts: 'trivy-report.html',
                     allowEmptyArchive: true,
                     fingerprint: true
 
+                // Fail build only for HIGH / CRITICAL vulnerabilities
                 bat 'trivy fs --include-dev-deps --exit-code 1 --severity HIGH,CRITICAL .'
             }
         }
 
+
+        // ============================================================
+        // SONARCLOUD ANALYSIS
+        // ============================================================
+
         stage('SonarCloud Analysis') {
             steps {
+
                 script {
 
                     def scannerHome = tool 'SonarScanner'
@@ -71,11 +109,21 @@ pipeline {
             }
         }
 
+
+        // ============================================================
+        // DOCKER BUILD
+        // ============================================================
+
         stage('Docker Build') {
             steps {
                 bat 'docker build -t to-do-list-app:%BUILD_NUMBER% .'
             }
         }
+
+
+        // ============================================================
+        // ARCHIVE APPLICATION
+        // ============================================================
 
         stage('Archive') {
             steps {
@@ -86,6 +134,11 @@ pipeline {
                     fingerprint: true
             }
         }
+
+
+        // ============================================================
+        // DEPLOY TO VERCEL
+        // ============================================================
 
         stage('Deploy') {
             steps {
@@ -108,12 +161,18 @@ pipeline {
             }
         }
 
+
+        // ============================================================
+        // OWASP ZAP SECURITY SCAN
+        // ============================================================
+
         stage('OWASP ZAP Scan') {
             steps {
+
                 script {
 
                     def zapExitCode = bat(
-                        script: 'docker run -t -v "%WORKSPACE%:/zap/wrk/:rw" zaproxy/zap-stable zap-baseline.py -t https://to-do-list-ci-cd-pipeline.vercel.app -r zap-report.html -J zap-report.json',
+                        script: 'docker run -t -v "%WORKSPACE%:/zap/wrk/:rw" zaproxy/zap-stable zap-baseline.py -t https://to-do-list-ci-cd-pipeline.vercel.app -r zap-report.html -J zap-report.json -x zap-report.xml',
                         returnStatus: true
                     )
 
@@ -122,23 +181,34 @@ pipeline {
                         echo "ZAP baseline scan completed with exit code ${zapExitCode}. Review zap-report.html for warnings."
                     }
 
-                    catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+                    // Push ZAP metrics using JSON report
+                    catchError(
+                        buildResult: 'SUCCESS',
+                        stageResult: 'SUCCESS'
+                    ) {
 
                         bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\push-zap-metrics.ps1'
                     }
                 }
 
-                archiveArtifacts artifacts: 'zap-report.html',
+                // Archive both HTML and XML reports
+                archiveArtifacts artifacts: 'zap-report.html,zap-report.xml',
                     allowEmptyArchive: true,
                     fingerprint: true
             }
         }
+
 
         /*
          * ============================================================
          * DEFECTDOJO INTEGRATION
          * ============================================================
          */
+
+
+        // ============================================================
+        // DEFECTDOJO - TRIVY
+        // ============================================================
 
         stage('DefectDojo - Trivy') {
             steps {
@@ -183,6 +253,11 @@ pipeline {
             }
         }
 
+
+        // ============================================================
+        // DEFECTDOJO - ZAP
+        // ============================================================
+
         stage('DefectDojo - ZAP') {
             steps {
 
@@ -196,13 +271,13 @@ pipeline {
                     bat '''
                         echo.
                         echo ==========================================
-                        echo Uploading ZAP Report to DefectDojo
+                        echo Uploading ZAP XML Report to DefectDojo
                         echo ==========================================
 
-                        if not exist zap-report.json (
-                            echo ERROR: zap-report.json not found
+                        if not exist zap-report.xml (
+                            echo ERROR: zap-report.xml not found
                             exit /b 1
-                        )
+                        }
 
                         curl.exe -sS -f ^
                           -X POST "http://localhost:8082/api/v2/reimport-scan/" ^
@@ -213,19 +288,24 @@ pipeline {
                           -F "auto_create_context=true" ^
                           -F "scan_type=ZAP Scan" ^
                           -F "test_title=OWASP ZAP Security Scan" ^
-                          -F "file=@zap-report.json"
+                          -F "file=@zap-report.xml"
 
                         if errorlevel 1 (
-                            echo ERROR: ZAP upload to DefectDojo failed
+                            echo ERROR: ZAP XML upload to DefectDojo failed
                             exit /b 1
                         )
 
-                        echo ZAP report uploaded successfully to DefectDojo.
+                        echo ZAP XML report uploaded successfully to DefectDojo.
                     '''
                 }
             }
         }
     }
+
+
+    // ================================================================
+    // POST ACTIONS
+    // ================================================================
 
     post {
 
