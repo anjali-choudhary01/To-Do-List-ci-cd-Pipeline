@@ -108,35 +108,6 @@ pipeline {
             }
         }
 
-        // stage('OWASP ZAP Scan') {
-        //     steps {
-        //         script {
-
-        //             def zapExitCode = bat(
-        //                 script: 'docker run -t -v "%WORKSPACE%:/zap/wrk/:rw" zaproxy/zap-stable zap-baseline.py -t https://to-do-list-ci-cd-pipeline.vercel.app -r zap-report.html -J zap-report.json',
-        //                 returnStatus: true
-        //             )
-
-        //             if (zapExitCode != 0) {
-
-        //                 echo "ZAP baseline scan exited with code ${zapExitCode} (non-zero usually just means it found warnings/alerts)"
-
-        //                 unstable(
-        //                     "ZAP baseline scan found issues (exit code ${zapExitCode})"
-        //                 )
-        //             }
-
-        //             catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
-
-        //                 bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\push-zap-metrics.ps1'
-        //             }
-        //         }
-
-        //         archiveArtifacts artifacts: 'zap-report.html',
-        //             allowEmptyArchive: true,
-        //             fingerprint: true
-        //     }
-        // }
         stage('OWASP ZAP Scan') {
             steps {
                 script {
@@ -160,8 +131,100 @@ pipeline {
                 archiveArtifacts artifacts: 'zap-report.html',
                     allowEmptyArchive: true,
                     fingerprint: true
+            }
         }
-}
+
+        /*
+         * ============================================================
+         * DEFECTDOJO INTEGRATION
+         * ============================================================
+         */
+
+        stage('DefectDojo - Trivy') {
+            steps {
+
+                withCredentials([
+                    string(
+                        credentialsId: 'defectdojo-api-key',
+                        variable: 'DEFECTDOJO_API_KEY'
+                    )
+                ]) {
+
+                    bat '''
+                        echo.
+                        echo ==========================================
+                        echo Uploading Trivy Report to DefectDojo
+                        echo ==========================================
+
+                        if not exist trivy-report.json (
+                            echo ERROR: trivy-report.json not found
+                            exit /b 1
+                        )
+
+                        curl.exe -sS -f ^
+                          -X POST "http://localhost:8082/api/v2/reimport-scan/" ^
+                          -H "Authorization: Token %DEFECTDOJO_API_KEY%" ^
+                          -F "product_type_name=Research and Development" ^
+                          -F "product_name=To-Do-List" ^
+                          -F "engagement_name=Trivy-ZAP-Scan-01" ^
+                          -F "auto_create_context=true" ^
+                          -F "scan_type=Trivy Scan" ^
+                          -F "test_title=Trivy Security Scan" ^
+                          -F "file=@trivy-report.json"
+
+                        if errorlevel 1 (
+                            echo ERROR: Trivy upload to DefectDojo failed
+                            exit /b 1
+                        )
+
+                        echo Trivy report uploaded successfully to DefectDojo.
+                    '''
+                }
+            }
+        }
+
+        stage('DefectDojo - ZAP') {
+            steps {
+
+                withCredentials([
+                    string(
+                        credentialsId: 'defectdojo-api-key',
+                        variable: 'DEFECTDOJO_API_KEY'
+                    )
+                ]) {
+
+                    bat '''
+                        echo.
+                        echo ==========================================
+                        echo Uploading ZAP Report to DefectDojo
+                        echo ==========================================
+
+                        if not exist zap-report.json (
+                            echo ERROR: zap-report.json not found
+                            exit /b 1
+                        )
+
+                        curl.exe -sS -f ^
+                          -X POST "http://localhost:8082/api/v2/reimport-scan/" ^
+                          -H "Authorization: Token %DEFECTDOJO_API_KEY%" ^
+                          -F "product_type_name=Research and Development" ^
+                          -F "product_name=To-Do-List" ^
+                          -F "engagement_name=Trivy-ZAP-Scan-01" ^
+                          -F "auto_create_context=true" ^
+                          -F "scan_type=ZAP Scan" ^
+                          -F "test_title=OWASP ZAP Security Scan" ^
+                          -F "file=@zap-report.json"
+
+                        if errorlevel 1 (
+                            echo ERROR: ZAP upload to DefectDojo failed
+                            exit /b 1
+                        )
+
+                        echo ZAP report uploaded successfully to DefectDojo.
+                    '''
+                }
+            }
+        }
     }
 
     post {
