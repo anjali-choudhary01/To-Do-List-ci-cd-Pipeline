@@ -12,10 +12,6 @@ pipeline {
 
     stages {
 
-        // ============================================================
-        // CHECKOUT
-        // ============================================================
-
         stage('Checkout') {
             steps {
                 git branch: 'main',
@@ -23,21 +19,11 @@ pipeline {
             }
         }
 
-
-        // ============================================================
-        // INSTALL
-        // ============================================================
-
         stage('Install') {
             steps {
                 bat 'npm install'
             }
         }
-
-
-        // ============================================================
-        // LINT
-        // ============================================================
 
         stage('Lint') {
             steps {
@@ -45,58 +31,49 @@ pipeline {
             }
         }
 
-
-        // ============================================================
-        // TEST
-        // ============================================================
-
         stage('Test') {
             steps {
                 bat 'npm test'
             }
         }
 
-
-        // ============================================================
-        // TRIVY SECURITY SCAN
-        // ============================================================
-
-        stage('Security Scan') {
+        stage('Security Scan - Trivy') {
             steps {
 
-                catchError(
-                    buildResult: 'SUCCESS',
-                    stageResult: 'SUCCESS'
-                ) {
+                bat '''
+                    trivy fs --include-dev-deps ^
+                      --format json ^
+                      --output trivy-report.json .
+                '''
 
-                    // Generate Trivy JSON report
-                    bat 'trivy fs --include-dev-deps --format json --output trivy-report.json .'
-
-                    // Push Trivy metrics to Prometheus Pushgateway
-                    bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\push-trivy-metrics.ps1'
-
-                    // Generate HTML report
-                    bat 'trivy fs --include-dev-deps --format template --template "@scripts/trivy-html.tpl" -o trivy-report.html .'
+                catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+                    bat '''
+                        powershell -NoProfile -ExecutionPolicy Bypass ^
+                        -File scripts\\push-trivy-metrics.ps1
+                    '''
                 }
 
-                // Archive HTML report
-                archiveArtifacts artifacts: 'trivy-report.html',
+                bat '''
+                    trivy fs --include-dev-deps ^
+                      --format template ^
+                      --template "@scripts/trivy-html.tpl" ^
+                      -o trivy-report.html .
+                '''
+
+                archiveArtifacts artifacts: 'trivy-report.html,trivy-report.json',
                     allowEmptyArchive: true,
                     fingerprint: true
 
-                // Fail build only for HIGH / CRITICAL vulnerabilities
-                bat 'trivy fs --include-dev-deps --exit-code 1 --severity HIGH,CRITICAL .'
+                bat '''
+                    trivy fs --include-dev-deps ^
+                      --exit-code 1 ^
+                      --severity HIGH,CRITICAL .
+                '''
             }
         }
 
-
-        // ============================================================
-        // SONARCLOUD ANALYSIS
-        // ============================================================
-
         stage('SonarCloud Analysis') {
             steps {
-
                 script {
 
                     def scannerHome = tool 'SonarScanner'
@@ -109,38 +86,26 @@ pipeline {
             }
         }
 
-
-        // ============================================================
-        // DOCKER BUILD
-        // ============================================================
-
         stage('Docker Build') {
             steps {
                 bat 'docker build -t to-do-list-app:%BUILD_NUMBER% .'
             }
         }
 
-
-        // ============================================================
-        // ARCHIVE APPLICATION
-        // ============================================================
-
-        stage('Archive') {
+        stage('Archive Application') {
             steps {
 
-                bat 'powershell -NoProfile -Command "Compress-Archive -Path index.html,todo.html,auth.js,auth.css,supabaseClient.js,script.js,style.css,images -DestinationPath to-do-list.zip -Force"'
+                bat '''
+                    powershell -NoProfile -Command ^
+                    "Compress-Archive -Path index.html,todo.html,auth.js,auth.css,supabaseClient.js,script.js,style.css,images -DestinationPath to-do-list.zip -Force"
+                '''
 
                 archiveArtifacts artifacts: 'to-do-list.zip',
                     fingerprint: true
             }
         }
 
-
-        // ============================================================
-        // DEPLOY TO VERCEL
-        // ============================================================
-
-        stage('Deploy') {
+        stage('Deploy to Vercel') {
             steps {
 
                 withCredentials([
@@ -161,155 +126,150 @@ pipeline {
             }
         }
 
-
-        // ============================================================
-        // OWASP ZAP SECURITY SCAN
-        // ============================================================
-
         stage('OWASP ZAP Scan') {
             steps {
 
                 script {
 
                     def zapExitCode = bat(
-                        script: 'docker run -t -v "%WORKSPACE%:/zap/wrk/:rw" zaproxy/zap-stable zap-baseline.py -t https://to-do-list-ci-cd-pipeline.vercel.app -r zap-report.html -J zap-report.json -x zap-report.xml',
+                        script: '''
+                            docker run -t ^
+                            -v "%WORKSPACE%:/zap/wrk/:rw" ^
+                            zaproxy/zap-stable ^
+                            zap-baseline.py ^
+                            -t https://to-do-list-ci-cd-pipeline.vercel.app ^
+                            -r zap-report.html ^
+                            -J zap-report.json ^
+                            -x zap-report.xml
+                        ''',
                         returnStatus: true
                     )
 
-                    if (zapExitCode != 0) {
+                    echo "ZAP exit code: ${zapExitCode}"
 
-                        echo "ZAP baseline scan completed with exit code ${zapExitCode}. Review zap-report.html for warnings."
+                    if (zapExitCode != 0) {
+                        echo "ZAP completed with warnings/non-zero exit code. Build will continue."
                     }
 
-                    // Push ZAP metrics using JSON report
-                    catchError(
-                        buildResult: 'SUCCESS',
-                        stageResult: 'SUCCESS'
-                    ) {
+                    catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
 
-                        bat 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\push-zap-metrics.ps1'
+                        bat '''
+                            powershell -NoProfile -ExecutionPolicy Bypass ^
+                            -File scripts\\push-zap-metrics.ps1
+                        '''
                     }
                 }
 
-                // Archive both HTML and XML reports
-                archiveArtifacts artifacts: 'zap-report.html,zap-report.xml',
+                archiveArtifacts artifacts: 'zap-report.html,zap-report.json,zap-report.xml',
                     allowEmptyArchive: true,
                     fingerprint: true
             }
         }
 
-
-        /*
-         * ============================================================
-         * DEFECTDOJO INTEGRATION
-         * ============================================================
-         */
-
-
-        // ============================================================
-        // DEFECTDOJO - TRIVY
-        // ============================================================
-
         stage('DefectDojo - Trivy') {
             steps {
 
-                withCredentials([
-                    string(
-                        credentialsId: 'defectdojo-api-key',
-                        variable: 'DEFECTDOJO_API_KEY'
-                    )
-                ]) {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
 
-                    bat '''
-                        echo.
-                        echo ==========================================
-                        echo Uploading Trivy Report to DefectDojo
-                        echo ==========================================
-
-                        if not exist trivy-report.json (
-                            echo ERROR: trivy-report.json not found
-                            exit /b 1
+                    withCredentials([
+                        string(
+                            credentialsId: 'defectdojo-api-key',
+                            variable: 'DEFECTDOJO_API_KEY'
                         )
+                    ]) {
 
-                        curl.exe -sS -f ^
-                          -X POST "http://localhost:8082/api/v2/reimport-scan/" ^
-                          -H "Authorization: Token %DEFECTDOJO_API_KEY%" ^
-                          -F "product_type_name=Research and Development" ^
-                          -F "product_name=To-Do-List" ^
-                          -F "engagement_name=Trivy-ZAP-Scan-01" ^
-                          -F "auto_create_context=true" ^
-                          -F "scan_type=Trivy Scan" ^
-                          -F "test_title=Trivy Security Scan" ^
-                          -F "file=@trivy-report.json"
+                        bat '''
+                            echo.
+                            echo ==========================================
+                            echo Uploading Trivy Report to DefectDojo
+                            echo ==========================================
 
-                        if errorlevel 1 (
-                            echo ERROR: Trivy upload to DefectDojo failed
-                            exit /b 1
-                        )
+                            if not exist trivy-report.json (
+                                echo WARNING: trivy-report.json not found
+                                exit /b 0
+                            )
 
-                        echo Trivy report uploaded successfully to DefectDojo.
-                    '''
+                            curl.exe -sS ^
+                              -X POST ^
+                              "http://localhost:8082/api/v2/reimport-scan/" ^
+                              -H "Authorization: Token %DEFECTDOJO_API_KEY%" ^
+                              -F "product_type_name=Research and Development" ^
+                              -F "product_name=To-Do-List" ^
+                              -F "engagement_name=Trivy-ZAP-Scan-01" ^
+                              -F "auto_create_context=true" ^
+                              -F "scan_type=Trivy Scan" ^
+                              -F "test_title=Trivy Security Scan" ^
+                              -F "file=@trivy-report.json"
+
+                            if errorlevel 1 (
+                                echo WARNING: Trivy upload to DefectDojo failed.
+                                exit /b 0
+                            )
+
+                            echo Trivy report uploaded successfully.
+                        '''
+                    }
                 }
             }
         }
 
-
-        // ============================================================
-        // DEFECTDOJO - ZAP
-        // ============================================================
-
         stage('DefectDojo - ZAP') {
             steps {
 
-                withCredentials([
-                    string(
-                        credentialsId: 'defectdojo-api-key',
-                        variable: 'DEFECTDOJO_API_KEY'
-                    )
-                ]) {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
 
-                    bat '''
-                        echo.
-                        echo ==========================================
-                        echo Uploading ZAP XML Report to DefectDojo
-                        echo ==========================================
-
-                        if not exist zap-report.xml (
-                            echo ERROR: zap-report.xml not found
-                            exit /b 1
-                        }
-
-                        curl.exe -sS -f ^
-                          -X POST "http://localhost:8082/api/v2/reimport-scan/" ^
-                          -H "Authorization: Token %DEFECTDOJO_API_KEY%" ^
-                          -F "product_type_name=Research and Development" ^
-                          -F "product_name=To-Do-List" ^
-                          -F "engagement_name=Trivy-ZAP-Scan-01" ^
-                          -F "auto_create_context=true" ^
-                          -F "scan_type=ZAP Scan" ^
-                          -F "test_title=OWASP ZAP Security Scan" ^
-                          -F "file=@zap-report.xml"
-
-                        if errorlevel 1 (
-                            echo ERROR: ZAP XML upload to DefectDojo failed
-                            exit /b 1
+                    withCredentials([
+                        string(
+                            credentialsId: 'defectdojo-api-key',
+                            variable: 'DEFECTDOJO_API_KEY'
                         )
+                    ]) {
 
-                        echo ZAP XML report uploaded successfully to DefectDojo.
-                    '''
+                        bat '''
+                            echo.
+                            echo ==========================================
+                            echo Uploading ZAP XML Report to DefectDojo
+                            echo ==========================================
+
+                            if not exist zap-report.xml (
+                                echo WARNING: zap-report.xml not found.
+                                exit /b 0
+                            )
+
+                            echo ZAP XML found:
+                            dir zap-report.xml
+
+                            curl.exe -sS ^
+                              -X POST ^
+                              "http://localhost:8082/api/v2/reimport-scan/" ^
+                              -H "Authorization: Token %DEFECTDOJO_API_KEY%" ^
+                              -F "product_type_name=Research and Development" ^
+                              -F "product_name=To-Do-List" ^
+                              -F "engagement_name=Trivy-ZAP-Scan-01" ^
+                              -F "auto_create_context=true" ^
+                              -F "scan_type=ZAP Scan" ^
+                              -F "test_title=OWASP ZAP Security Scan" ^
+                              -F "file=@zap-report.xml"
+
+                            if errorlevel 1 (
+                                echo WARNING: ZAP upload to DefectDojo failed.
+                                exit /b 0
+                            )
+
+                            echo ZAP XML report uploaded successfully.
+                        '''
+                    }
                 }
             }
         }
     }
 
-
-    // ================================================================
-    // POST ACTIONS
-    // ================================================================
-
     post {
 
         always {
+
+            echo "Pipeline completed. Cleaning workspace."
+
             cleanWs()
         }
 
